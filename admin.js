@@ -77,7 +77,7 @@ auth.onAuthStateChanged(u => {
 });
 function iniciar() {
   ouvirPush(); ajustarLayout(); criarBotaoVenda();
-  db.collection('config').doc('loja').onSnapshot(s => { CFG = s.data() || {}; if (!ajInit) { ajInit = true; preencherAjustes(); montarAparencia(); } renderBairros(); });
+  db.collection('config').doc('loja').onSnapshot(s => { CFG = s.data() || {}; if (!ajInit) { ajInit = true; preencherAjustes(); montarAparencia(); montarTamanhos(); } renderBairros(); aplicarTamanhos(); });
   db.collection('pedidos').orderBy('criadoEm', 'desc').limit(100).onSnapshot(s => {
     if (!primeiro) s.docChanges().filter(c => c.type === 'added').forEach(c => {
       const p = c.doc.data(); if (p.origem === 'Manual') return; const t = $('toast'); t.textContent = '🛍️ Novo pedido recebido!'; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 5000);
@@ -100,10 +100,11 @@ function iniciar() {
     <div class="szs" id="e${d.id}">${(p.tamanhos || ['Único']).map(t => `<div class="sz"><b>${esc(t)}</b><input type="number" min="0" inputmode="numeric" data-t="${esc(t)}" value="${p.estoque ? (p.estoque[t] ?? 0) : ''}" placeholder="∞"></div>`).join('')}</div>
     <small id="rs${d.id}" style="display:block;color:var(--mut);margin-bottom:8px"></small>
     <div style="display:flex;gap:6px;margin-bottom:8px"><button class="ab g" style="flex:1" onclick="salvarEstoque('${d.id}')">Salvar estoque</button><button class="ab r" onclick="esgotar('${d.id}')">Esgotar</button></div>
+    <div style="display:flex;gap:6px;margin-bottom:8px"><select id="at${d.id}" style="margin:0;flex:1;min-width:0"></select><button class="ab g" id="atb${d.id}" onclick="addTamProd('${d.id}')">+ Tamanho</button></div>
     <button class="btn o" style="width:100%;margin-bottom:6px" onclick="editarProd('${d.id}')">Editar produto</button>
     <button class="btn o" style="width:100%;margin-bottom:6px" onclick="trocarFotoProd('${d.id}')">Trocar foto</button>
     <button class="btn o" style="width:100%;margin-bottom:6px" onclick="db.collection('produtos').doc('${d.id}').update({ativo:${!p.ativo}})">${p.ativo ? 'Ocultar' : 'Mostrar'}</button>
-    <button class="btn o" style="width:100%" onclick="if(confirm('Excluir?'))db.collection('produtos').doc('${d.id}').delete()">Excluir</button></div></div>`; }).join(''); pintarReservas();
+    <button class="btn o" style="width:100%" onclick="if(confirm('Excluir?'))db.collection('produtos').doc('${d.id}').delete()">Excluir</button></div></div>`; }).join(''); pintarReservas(); pintarAddTam();
   });
   db.collection('reservas').onSnapshot(s => { RES = {}; s.docs.forEach(d => RES[d.id] = d.data().n || 0); pintarReservas(); }, () => {});
 }
@@ -401,8 +402,86 @@ function enviarPix(id) {
 }
 
 // ── Tamanhos e estoque ──
-const TAMS = ["P","M","G","GG","XG","Único"];
-$('szs').innerHTML = TAMS.map(t => `<div class="sz"><b>${t}</b><input type="number" min="0" inputmode="numeric" data-t="${t}" placeholder="—"></div>`).join('');
+// ── Tamanhos: lista da loja, editável no painel (seção TAMANHOS) ──
+// A lista fica em config/loja.tamanhos. Se nunca foi editada, vale a lista padrão abaixo.
+const TAMS_PADRAO = ["P","M","G","GG","XG","Único"];
+let TAMS = TAMS_PADRAO.slice();
+const tamValido = t => /^[\p{L}\p{N}][\p{L}\p{N} .+\-ºª]{0,11}$/u.test(t);   // até 12 caracteres: letras, números, espaço, ponto, + ou -
+function desenharTamanhosForm() {   // campos de estoque do "Cadastrar produto"; mantém o que já foi digitado
+  const box = $('szs'); if (!box) return; const antes = {};
+  box.querySelectorAll('input[data-t]').forEach(i => { if (i.value !== '') antes[i.dataset.t] = i.value; });
+  box.innerHTML = TAMS.map(t => `<div class="sz"><b>${esc(t)}</b><input type="number" min="0" inputmode="numeric" data-t="${esc(t)}" placeholder="—" value="${esc(antes[t] ?? '')}"></div>`).join('');
+}
+function aplicarTamanhos() {   // chamada sempre que os ajustes da loja mudam
+  const l = Array.isArray(CFG.tamanhos) ? CFG.tamanhos.filter(t => typeof t === 'string' && t.trim()) : [];
+  TAMS = l.length ? l : TAMS_PADRAO.slice();
+  desenharTamanhosForm(); desenharTamanhosLista(); pintarAddTam();
+}
+function montarTamanhos() {   // cria a seção TAMANHOS logo acima de PRODUTOS
+  if ($('tam-sec')) return;
+  const prod = [...document.querySelectorAll('#tP .sec')].find(x => { const h = x.querySelector('h2'); return h && h.textContent.trim() === 'PRODUTOS'; });
+  if (!prod) return;
+  const s = document.createElement('div'); s.className = 'sec'; s.id = 'tam-sec';
+  s.innerHTML = `<h2 class="pt">TAMANHOS</h2>
+    <p class="rd">Os tamanhos que a sua loja vende. Eles aparecem ao cadastrar um produto novo e no botão <b>+ Tamanho</b> de cada produto já cadastrado. Para adicionar vários de uma vez, separe por vírgula (ex.: PP, 36, 38). Use ◀ ▶ para mudar a ordem. Tirar um tamanho daqui não apaga ele dos produtos que já o têm.</p>
+    <div id="tamLista" style="display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px"></div>
+    <label>Novo tamanho</label>
+    <div class="rctl"><input id="tamN" placeholder="Ex.: PP, 38, XGG" maxlength="80" autocomplete="off" style="flex:1;min-width:160px;width:auto;margin:0" onkeydown="if(event.key==='Enter')addTamanho()"><button class="btn" onclick="addTamanho()">Adicionar</button></div>
+    <div style="margin-top:12px"><button class="btn o" onclick="padraoTamanhos()">Voltar à lista padrão</button></div>`;
+  prod.parentNode.insertBefore(s, prod);
+}
+function desenharTamanhosLista() {
+  const el = $('tamLista'); if (!el) return;
+  el.innerHTML = TAMS.map((t, i) => `<span class="cli" style="margin:0;padding:6px 8px;gap:10px"><b>${esc(t)}</b><span style="display:inline-flex;gap:2px"><button class="ab b" ${i ? '' : 'disabled'} onclick="moverTamanho(${i},-1)">◀</button><button class="ab b" ${i < TAMS.length - 1 ? '' : 'disabled'} onclick="moverTamanho(${i},1)">▶</button><button class="ab r" onclick="tirarTamanho(${i})">✕</button></span></span>`).join('');
+}
+async function gravarTamanhos(lista) {
+  try { await db.collection('config').doc('loja').set({ tamanhos: lista }, { merge: true }); return true; }
+  catch (e) { alert('Erro ao salvar: ' + e.message); return false; }
+}
+async function addTamanho() {
+  const novos = $('tamN').value.split(/[,;\n]+/).map(x => x.trim().replace(/\s+/g, ' ')).filter(Boolean);
+  if (!novos.length) return alert('Digite o tamanho (ex.: PP).');
+  const L = TAMS.slice(), ruins = [];
+  novos.forEach(t => { if (!tamValido(t)) ruins.push(t); else if (!L.some(x => normN(x) === normN(t))) L.push(t); });
+  if (ruins.length) return alert('Tamanho inválido: ' + ruins.join(', ') + '\n\nUse até 12 caracteres: letras, números, espaço, ponto, + ou -.');
+  if (L.length === TAMS.length) return alert(novos.length > 1 ? 'Esses tamanhos já estão na lista.' : 'Esse tamanho já está na lista.');
+  if (L.length > 30) return alert('Limite de 30 tamanhos.');
+  if (await gravarTamanhos(L)) { $('tamN').value = ''; $('tamN').focus(); avisoAdm(L.length - TAMS.length > 1 ? 'Tamanhos adicionados' : 'Tamanho adicionado'); }
+}
+async function moverTamanho(i, d) {
+  const j = i + d; if (j < 0 || j >= TAMS.length) return;
+  const L = TAMS.slice(); [L[i], L[j]] = [L[j], L[i]];
+  if (await gravarTamanhos(L)) avisoAdm('Ordem salva');
+}
+async function tirarTamanho(i) {
+  if (TAMS.length <= 1) return alert('A loja precisa ter pelo menos um tamanho.');
+  if (!confirm('Tirar "' + TAMS[i] + '" da lista?\n\nOs produtos que já têm esse tamanho continuam com ele.')) return;
+  if (await gravarTamanhos(TAMS.filter((_, k) => k !== i))) avisoAdm('Tamanho removido');
+}
+async function padraoTamanhos() {
+  if (!confirm('Voltar à lista padrão de tamanhos (' + TAMS_PADRAO.join(', ') + ')?')) return;
+  try { await db.collection('config').doc('loja').set({ tamanhos: firebase.firestore.FieldValue.delete() }, { merge: true }); avisoAdm('Lista padrão restaurada'); }
+  catch (e) { alert('Erro: ' + e.message); }
+}
+// Em cada produto já cadastrado: escolher um tamanho da lista e adicionar (entra com estoque 0 até você preencher)
+const ordTam = a => { const ix = t => { const k = TAMS.indexOf(t); return k < 0 ? 999 : k; }; return a.map((t, i) => [t, i]).sort((x, y) => ix(x[0]) - ix(y[0]) || x[1] - y[1]).map(x => x[0]); };
+function pintarAddTam() {
+  Object.keys(PROD).forEach(id => {
+    const sel = $('at' + id), bt = $('atb' + id); if (!sel) return;
+    const tem = PROD[id].tamanhos || ['Único'], falta = TAMS.filter(t => !tem.includes(t));
+    sel.innerHTML = falta.length ? falta.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('') : '<option value="">Todos os tamanhos já adicionados</option>';
+    sel.disabled = !falta.length; if (bt) bt.disabled = !falta.length;
+  });
+}
+async function addTamProd(id) {
+  const p = PROD[id], sel = $('at' + id), t = sel && sel.value; if (!p || !t) return;
+  const tem = p.tamanhos || ['Único']; if (tem.includes(t)) return;
+  const upd = { tamanhos: ordTam([...tem, t]) };
+  if (p.estoque) upd.estoque = { ...p.estoque, [t]: 0 };   // produto com estoque controlado: o tamanho novo começa esgotado
+  try { await db.collection('produtos').doc(id).update(upd); avisoAdm('Tamanho ' + t + ' adicionado: preencha a quantidade e toque em Salvar estoque'); }
+  catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+desenharTamanhosForm();
 function lerEstoque(c, vazioZero) {
   const e = {}; c.querySelectorAll('input[data-t]').forEach(i => { if (i.value !== '') e[i.dataset.t] = Math.max(0, parseInt(i.value) || 0); else if (vazioZero) e[i.dataset.t] = 0; }); return e;
 }
