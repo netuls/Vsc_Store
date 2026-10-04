@@ -77,7 +77,7 @@ auth.onAuthStateChanged(u => {
 });
 function iniciar() {
   ouvirPush(); ajustarLayout(); criarBotaoVenda();
-  db.collection('config').doc('loja').onSnapshot(s => { CFG = s.data() || {}; if (!ajInit) { ajInit = true; preencherAjustes(); montarAparencia(); montarTamanhos(); montarUber(); } renderBairros(); aplicarTamanhos(); });
+  db.collection('config').doc('loja').onSnapshot(s => { CFG = s.data() || {}; if (!ajInit) { ajInit = true; preencherAjustes(); montarAparencia(); montarTamanhos(); montarUber(); montarEntregaOpc(); } renderBairros(); aplicarTamanhos(); });
   db.collection('pedidos').orderBy('criadoEm', 'desc').limit(100).onSnapshot(s => {
     if (!primeiro) s.docChanges().filter(c => c.type === 'added').forEach(c => {
       const p = c.doc.data(); if (p.origem === 'Manual') return; const t = $('toast'); t.textContent = '🛍️ Novo pedido recebido!'; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 5000);
@@ -810,6 +810,26 @@ function ajustarLayout() {
   }
 }
 
+// ── Entrega: liga/desliga a opção "Entrega" (a entrega feita pela própria loja) ──
+function montarEntregaOpc() {
+  if ($('en-sec')) return;
+  const alvo = $('uf-sec') || $('tema-sec') || [...document.querySelectorAll('#tP .sec')].find(x => { const h = x.querySelector('h2'); return h && h.textContent.trim() === 'PIX'; });
+  if (!alvo) return;
+  const s = document.createElement('div'); s.className = 'sec'; s.id = 'en-sec';
+  s.innerHTML = `<h2 class="pt">ENTREGA</h2>
+    <p class="rd">Entrega feita pela sua loja (com endereço, bairro e taxa). Desligada, o cliente <b>não vê</b> o botão Entrega: ficam só o Uber Flash (se estiver ligado) e Retirar na loja. Os pedidos que já existem não mudam.</p>
+    <label>Oferecer Entrega na loja?</label><select id="enAtivo"><option value="1">Sim, oferecer</option><option value="0">Não oferecer</option></select>
+    <button class="btn" onclick="salvarEntregaOpc()">Salvar Entrega</button>`;
+  alvo.parentNode.insertBefore(s, alvo);
+  $('enAtivo').value = CFG.entregaAtiva === false ? '0' : '1';
+}
+async function salvarEntregaOpc() {
+  const on = $('enAtivo').value === '1';
+  if (!on && (CFG.uberFlash || {}).ativo === false && !confirm('Com Entrega e Uber Flash desligados, o cliente só poderá retirar na loja. Continuar?')) return;
+  try { await db.collection('config').doc('loja').set({ entregaAtiva: on }, { merge: true }); avisoAdm(on ? 'Entrega ligada' : 'Entrega desligada'); }
+  catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+
 // ── Uber Flash: liga/desliga a opção na loja e define um aviso opcional para o cliente ──
 function montarUber() {
   if ($('uf-sec')) return;
@@ -825,6 +845,7 @@ function montarUber() {
   const u = CFG.uberFlash || {}; $('ufAtivo').value = u.ativo === false ? '0' : '1'; $('ufAviso').value = u.aviso || '';
 }
 async function salvarUber() {
+  if ($('ufAtivo').value === '0' && CFG.entregaAtiva === false && !confirm('Com Entrega e Uber Flash desligados, o cliente só poderá retirar na loja. Continuar?')) return;
   try { await db.collection('config').doc('loja').set({ uberFlash: { ativo: $('ufAtivo').value === '1', aviso: $('ufAviso').value.trim().slice(0, 300) } }, { merge: true }); avisoAdm('Uber Flash salvo'); }
   catch (e) { alert('Erro ao salvar: ' + e.message); }
 }
