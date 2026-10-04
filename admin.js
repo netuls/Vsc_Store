@@ -77,7 +77,7 @@ auth.onAuthStateChanged(u => {
 });
 function iniciar() {
   ouvirPush(); ajustarLayout(); criarBotaoVenda();
-  db.collection('config').doc('loja').onSnapshot(s => { CFG = s.data() || {}; if (!ajInit) { ajInit = true; preencherAjustes(); montarAparencia(); montarTamanhos(); } renderBairros(); aplicarTamanhos(); });
+  db.collection('config').doc('loja').onSnapshot(s => { CFG = s.data() || {}; if (!ajInit) { ajInit = true; preencherAjustes(); montarAparencia(); montarTamanhos(); montarUber(); } renderBairros(); aplicarTamanhos(); });
   db.collection('pedidos').orderBy('criadoEm', 'desc').limit(100).onSnapshot(s => {
     if (!primeiro) s.docChanges().filter(c => c.type === 'added').forEach(c => {
       const p = c.doc.data(); if (p.origem === 'Manual') return; const t = $('toast'); t.textContent = '🛍️ Novo pedido recebido!'; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 5000);
@@ -86,7 +86,7 @@ function iniciar() {
     primeiro = false;
     PED = {}; s.docs.forEach(x => PED[x.id] = x.data());
     $('peds').innerHTML = s.docs.map(d => { const p = d.data(), id = d.id, sc = STIDX[p.status] ?? 0, ent = p.entrega, end = ent && ent.endereco;
-      const entHtml = !ent ? '' : ent.tipo === 'Retirada' ? '<br><small>🏬 Retirada na loja</small>' : '<br><small>📍 <a href="https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(txtEnd(end)) + '" target="_blank" rel="noopener" style="color:inherit">' + esc(end.rua) + ', ' + esc(end.numero) + (end.complemento ? ' (' + esc(end.complemento) + ')' : '') + ' - ' + esc(end.bairro) + ', ' + esc(end.cidade) + '</a>' + (end.ref ? '<br>Ref.: ' + esc(end.ref) : '') + '</small>';
+      const entHtml = !ent ? '' : ent.tipo === 'Retirada' ? '<br><small>🏬 Retirada na loja</small>' : '<br><small>' + (ent.tipo === 'Uber Flash' ? '🛵 Uber Flash · ' : '📍 ') + '<a href="https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(txtEnd(end)) + '" target="_blank" rel="noopener" style="color:inherit">' + esc(end.rua) + ', ' + esc(end.numero) + (end.complemento ? ' (' + esc(end.complemento) + ')' : '') + ' - ' + esc(end.bairro) + ', ' + esc(end.cidade) + '</a>' + (end.ref ? '<br>Ref.: ' + esc(end.ref) : '') + (ent.tipo === 'Uber Flash' ? '<br>Frete: a combinar' : '') + '</small>';
       const b = (txt, cls, st) => `<button class="ab ${cls}" ${p.status === st ? 'disabled' : ''} onclick="setStatus('${id}','${st}')">${txt}</button>`;
       return `<tr><td data-l="Cliente"><b>${esc(p.cliente.nome)}</b><br><small style="color:var(--mut)">Pedido nº ${nPed(id)}${p.origem === 'Manual' ? ' · 🧾 venda manual' : ''}</small>${entHtml}</td><td class="wa" data-l="WhatsApp">${esc(p.cliente.tel)}</td><td data-l="Itens"><small>${p.itens.map(i => esc(i.nome) + ' ' + esc(i.tam) + '×' + i.q).join('<br>')}</small></td>
       <td data-l="Data">${p.criadoEm ? p.criadoEm.toDate().toLocaleString('pt-BR') : ''}</td><td data-l="Pagamento">${esc(p.pagamento)}${p.pagamentoQuando ? '<br><small style="color:var(--mut)">' + esc(({ 'Na entrega': 'na entrega', 'Na retirada': 'na retirada', 'Antecipado': 'pago antecipado' })[p.pagamentoQuando] || p.pagamentoQuando) + '</small>' : ''}</td><td data-l="Valor">${R$(p.total)}${p.frete ? '<br><small style="color:var(--mut)">frete ' + R$(p.frete) + '</small>' : ''}</td>
@@ -242,7 +242,7 @@ const pagTxt = (pag, q) => pag + (q === 'Na entrega' ? ' · pagamento na entrega
 const nPed = id => { const n = (PED[id] || {}).numero; return n ? String(n).padStart(2, '0') : id.slice(0, 6).toUpperCase(); };   // pedidos antigos, sem número sequencial, mostram o código antigo
 const txtEnd = e => e.rua + ', ' + e.numero + (e.complemento ? ' (' + e.complemento + ')' : '') + ' - ' + e.bairro + ', ' + e.cidade + (e.cep ? ' · CEP ' + e.cep : '');
 function detalhesPedido(p) {
-  const ent = p.entrega, entTxt = !ent ? '' : ent.tipo === 'Retirada' ? '\n\n*Retirada na loja*' + ((CFG.retirada || {}).endereco ? '\n' + CFG.retirada.endereco + (CFG.retirada.horario ? '\nHorário: ' + CFG.retirada.horario : '') : '') : '\n\n*Entrega*\n' + txtEnd(ent.endereco) + (p.frete ? '\n*Frete:* ' + R$(p.frete) : '');
+  const ent = p.entrega, entTxt = !ent ? '' : ent.tipo === 'Retirada' ? '\n\n*Retirada na loja*' + ((CFG.retirada || {}).endereco ? '\n' + CFG.retirada.endereco + (CFG.retirada.horario ? '\nHorário: ' + CFG.retirada.horario : '') : '') : ent.tipo === 'Uber Flash' ? '\n\n*Uber Flash*\n' + txtEnd(ent.endereco) + '\n*Frete:* a combinar pelo WhatsApp' : '\n\n*Entrega*\n' + txtEnd(ent.endereco) + (p.frete ? '\n*Frete:* ' + R$(p.frete) : '');
   return '*Resumo do pedido*\n' + p.itens.map(i => i.q + '× ' + i.nome + ' (' + i.tam + ') — ' + R$(i.preco * i.q)).join('\n') + entTxt + '\n\n*Pagamento:* ' + pagTxt(p.pagamento, p.pagamentoQuando) + '\n';
 }
 function zap(id, stNovo) {
@@ -576,7 +576,7 @@ function relCsv() {
   const k = $('rm').value, l = (POR[k] || []).slice().sort((a, b) => a.criadoEm.seconds - b.criadoEm.seconds);
   if (!l.length) return alert('Não há pedidos neste mês.');
   const c = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
-  const linhas = [['Nº', 'Data', 'Cliente', 'Telefone', 'Itens', 'Entrega', 'Frete', 'Pagamento', 'Quando paga', 'Status', 'Total']].concat(l.map(p => [p.numero || '', p.criadoEm.toDate().toLocaleString('pt-BR'), p.cliente.nome, p.cliente.tel, (p.itens || []).map(i => i.nome + ' ' + i.tam + ' x' + i.q).join(' | '), p.entrega ? (p.entrega.tipo === 'Retirada' ? 'Retirada' : txtEnd(p.entrega.endereco)) : '', (p.frete || 0).toFixed(2).replace('.', ','), p.pagamento, p.pagamentoQuando || '', p.status, (p.total || 0).toFixed(2).replace('.', ',')]));
+  const linhas = [['Nº', 'Data', 'Cliente', 'Telefone', 'Itens', 'Entrega', 'Frete', 'Pagamento', 'Quando paga', 'Status', 'Total']].concat(l.map(p => [p.numero || '', p.criadoEm.toDate().toLocaleString('pt-BR'), p.cliente.nome, p.cliente.tel, (p.itens || []).map(i => i.nome + ' ' + i.tam + ' x' + i.q).join(' | '), p.entrega ? (p.entrega.tipo === 'Retirada' ? 'Retirada' : (p.entrega.tipo === 'Uber Flash' ? 'Uber Flash: ' : '') + txtEnd(p.entrega.endereco)) : '', (p.frete || 0).toFixed(2).replace('.', ','), p.pagamento, p.pagamentoQuando || '', p.status, (p.total || 0).toFixed(2).replace('.', ',')]));
   const blob = new Blob(['\ufeff' + linhas.map(r => r.map(c).join(';')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'pedidos-' + k + '.csv'; document.body.appendChild(a); a.click(); a.remove();
 }
@@ -808,6 +808,25 @@ function ajustarLayout() {
     if (mw && mw < 1400) el.style.maxWidth = 'min(1400px, 96vw)';   // alarga o painel para caberem todos os botões
     if (cs.overflowX === 'hidden') el.style.overflowX = 'auto';      // se ainda faltar espaço, rola em vez de cortar
   }
+}
+
+// ── Uber Flash: liga/desliga a opção na loja e define um aviso opcional para o cliente ──
+function montarUber() {
+  if ($('uf-sec')) return;
+  const alvo = $('tema-sec') || [...document.querySelectorAll('#tP .sec')].find(x => { const h = x.querySelector('h2'); return h && h.textContent.trim() === 'PIX'; });
+  if (!alvo) return;
+  const s = document.createElement('div'); s.className = 'sec'; s.id = 'uf-sec';
+  s.innerHTML = `<h2 class="pt">UBER FLASH</h2>
+    <p class="rd">Entrega por motoboy do Uber Flash. Ligado, o cliente vê a opção <b>Uber Flash</b> ao finalizar (junto de Entrega e Retirar na loja), informa o endereço e paga <b>só os produtos, por Pix</b>. O valor da corrida você calcula no app do Uber e combina com o cliente pelo WhatsApp. No pedido, o frete aparece como "a combinar".</p>
+    <label>Oferecer Uber Flash na loja?</label><select id="ufAtivo"><option value="1">Sim, oferecer</option><option value="0">Não oferecer</option></select>
+    <label>Aviso para o cliente (opcional)</label><textarea id="ufAviso" rows="3" maxlength="300" placeholder="Ex.: Uber Flash de segunda a sábado, das 9h às 17h."></textarea>
+    <button class="btn" onclick="salvarUber()">Salvar Uber Flash</button>`;
+  alvo.parentNode.insertBefore(s, alvo);
+  const u = CFG.uberFlash || {}; $('ufAtivo').value = u.ativo === false ? '0' : '1'; $('ufAviso').value = u.aviso || '';
+}
+async function salvarUber() {
+  try { await db.collection('config').doc('loja').set({ uberFlash: { ativo: $('ufAtivo').value === '1', aviso: $('ufAviso').value.trim().slice(0, 300) } }, { merge: true }); avisoAdm('Uber Flash salvo'); }
+  catch (e) { alert('Erro ao salvar: ' + e.message); }
 }
 
 // ── Aparência do site: cores e letra (a prévia é aplicada na hora no próprio painel) ──
