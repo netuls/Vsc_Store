@@ -12,11 +12,16 @@ const precoAtual = p => (p.promo > 0 && p.promo < p.preco) ? p.promo : p.preco;
 const emPromo = p => precoAtual(p) < p.preco;
 db.collection('produtos').where('ativo', '==', true).onSnapshot(s => { prods = s.docs.map(d => ({ id: d.id, ...d.data() })); renderLoja(); });
 const logos = [...document.querySelectorAll('.brand img, .hero img')]; logos.forEach(i => i.dataset.o = i.getAttribute('src'));
+// Sem "piscar" a logo antiga: usa a última logo salva neste aparelho; na primeira visita, esconde até a logo da loja chegar
+const LOGO_KEY = 'logo_loja'; let logoCache = ''; try { logoCache = localStorage.getItem(LOGO_KEY) || ''; } catch (e) {}
+logos.forEach(i => { if (logoCache) i.src = logoCache; else i.style.visibility = 'hidden'; });
+setTimeout(() => logos.forEach(i => i.style.visibility = ''), 3000);   // se a internet falhar, mostra a logo padrão
 db.collection('config').doc('loja').onSnapshot(s => {
   const c = s.data() || {}; if (c.whatsapp) LOJA.whatsapp = c.whatsapp; PIX = c.pix || null;
   RETIRADA = c.retirada || {}; BAIRROS = Array.isArray(c.bairros) ? c.bairros : []; BAIRRO_OUTROS = c.bairroOutros || 'padrao'; FRETE = +c.frete || 0; FRETE_GRATIS = +c.freteGratis || 0; REINICIAR = c.reiniciar || 'nunca';
   UBER = { ativo: !(c.uberFlash && c.uberFlash.ativo === false), aviso: (c.uberFlash && c.uberFlash.aviso) || '' }; ENTREGA_ON = c.entregaAtiva !== false; corrigirEntrega();
-  logos.forEach(i => i.src = c.logo || i.dataset.o);
+  try { c.logo ? localStorage.setItem(LOGO_KEY, c.logo) : localStorage.removeItem(LOGO_KEY); } catch (e) {}
+  logos.forEach(i => { const novo = c.logo || i.dataset.o; if (i.getAttribute('src') !== novo) i.src = novo; i.style.visibility = ''; });
   if ($('pCarrinho').classList.contains('on')) renderCarrinho();
 }, () => {});
 // Estoque por tamanho: p.estoque = { P: 3, M: 0 }; sem p.estoque o produto é ilimitado
