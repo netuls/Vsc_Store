@@ -1,5 +1,5 @@
 const STIDX = { 'Novo': 0, 'Aguardando conferência': 1, 'Confirmado': 2, 'Em separação': 3, 'Saiu para entrega': 4, 'Entregue': 5, 'Cancelado': 6 };
-let prods = [], cart = [], cat = 'Todos', forma = 'Pix', user = null, perfil = {}, PIX = null, FRETE = 0, FRETE_GRATIS = 0, BAIRROS = [], BAIRRO_OUTROS = 'padrao', RETIRADA = {}, REINICIAR = 'nunca', entrega = 'Entrega', endTocado = false, enviando = false;
+let prods = [], cart = [], cat = 'Todos', forma = 'Pix', user = null, perfil = {}, PIX = null, FRETE = 0, FRETE_GRATIS = 0, BAIRROS = [], BAIRRO_OUTROS = 'padrao', RETIRADA = {}, REINICIAR = 'nunca', entrega = 'Entrega', UBER = { ativo: true, aviso: '' }, endTocado = false, enviando = false;
 const $ = id => document.getElementById(id);
 const abrir = id => { fechar(); $(id).classList.add('on'); if (id === 'pCarrinho') renderCarrinho(); };
 const fechar = () => document.querySelectorAll('.ov').forEach(o => o.classList.remove('on'));
@@ -15,6 +15,7 @@ const logos = [...document.querySelectorAll('.brand img, .hero img')]; logos.for
 db.collection('config').doc('loja').onSnapshot(s => {
   const c = s.data() || {}; if (c.whatsapp) LOJA.whatsapp = c.whatsapp; PIX = c.pix || null;
   RETIRADA = c.retirada || {}; BAIRROS = Array.isArray(c.bairros) ? c.bairros : []; BAIRRO_OUTROS = c.bairroOutros || 'padrao'; FRETE = +c.frete || 0; FRETE_GRATIS = +c.freteGratis || 0; REINICIAR = c.reiniciar || 'nunca';
+  UBER = { ativo: !(c.uberFlash && c.uberFlash.ativo === false), aviso: (c.uberFlash && c.uberFlash.aviso) || '' }; if (!UBER.ativo && entrega === 'Uber Flash') entrega = 'Entrega';
   logos.forEach(i => i.src = c.logo || i.dataset.o);
   if ($('pCarrinho').classList.contains('on')) renderCarrinho();
 }, () => {});
@@ -61,7 +62,7 @@ function mudaQ(i, d) {
 const subtotal = () => cart.reduce((a, c) => a + c.preco * c.q, 0);
 const norm = x => String(x || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 const acharBairro = n => BAIRROS.find(b => norm(b.nome) === norm(n));
-const bairroSel = () => { if (!$('eBai')) return ''; if (!BAIRROS.length) return $('eBaiO').value.trim(); const v = $('eBai').value; return v === '__outro' ? $('eBaiO').value.trim() : v; };
+const bairroSel = () => { if (!$('eBai')) return ''; if (!BAIRROS.length || entrega === 'Uber Flash') return $('eBaiO').value.trim(); const v = $('eBai').value; return v === '__outro' ? $('eBaiO').value.trim() : v; };
 function taxaEntrega() {   // null = não entregamos nesse bairro
   if (!BAIRROS.length) return FRETE;   // sem tabela por bairro: taxa única
   const b = bairroSel(), m = acharBairro(b); if (m) return +m.taxa || 0;
@@ -76,7 +77,8 @@ function montarEntrega() {
   const fp = $('fp'); if (!fp || $('entBox')) return;
   const d = document.createElement('div'); d.id = 'entBox'; d.setAttribute('oninput', 'endTocado=true');
   d.innerHTML = `<label>Como você quer receber?</label>
-  <div style="display:flex;gap:8px;margin-bottom:12px"><button class="btn" id="eBtE" style="flex:1" onclick="setEntrega('Entrega')">Entrega</button><button class="btn o" id="eBtR" style="flex:1" onclick="setEntrega('Retirada')">Retirar na loja</button></div>
+  <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px"><button class="btn" id="eBtE" style="flex:1 1 auto;padding-left:12px;padding-right:12px" onclick="setEntrega('Entrega')">Entrega</button><button class="btn o" id="eBtU" style="flex:1 1 auto;padding-left:12px;padding-right:12px" onclick="setEntrega('Uber Flash')">Uber Flash</button><button class="btn o" id="eBtR" style="flex:1 1 auto;padding-left:12px;padding-right:12px" onclick="setEntrega('Retirada')">Retirar na loja</button></div>
+  <div id="eUber" class="pinfo" style="display:none;margin-bottom:12px"></div>
   <div id="eEnd">
     <label>CEP</label><input id="eCep" inputmode="numeric" maxlength="9" placeholder="00000-000" autocomplete="postal-code" oninput="buscarCep()">
     <label>Rua</label><input id="eRua" autocomplete="address-line1">
@@ -88,11 +90,23 @@ function montarEntrega() {
   <div id="eRetBox" style="display:none;margin-bottom:12px"></div>`;
   const lab = fp.previousElementSibling; fp.parentNode.insertBefore(d, lab && lab.tagName === 'LABEL' ? lab : fp);
 }
+// Uber Flash: motoboy do Uber. O cliente informa o endereço e paga só os produtos por Pix; a corrida (que depende da distância) a loja confirma pelo WhatsApp.
+const UBER_AVISO = 'Entrega por motoboy do Uber Flash. O valor da corrida depende da distância: a loja calcula e confirma com você pelo WhatsApp. O Pix cobre só os produtos.';
+function pintarEntrega() {   // deixa a tela de acordo com a opção escolhida (Entrega, Uber Flash ou Retirada)
+  if (!$('eBtE')) return;
+  const t = entrega, uf = t === 'Uber Flash';
+  $('eBtE').className = 'btn' + (t === 'Entrega' ? '' : ' o'); $('eBtR').className = 'btn' + (t === 'Retirada' ? '' : ' o'); $('eBtU').className = 'btn' + (uf ? '' : ' o');
+  $('eBtU').style.display = UBER.ativo ? '' : 'none';
+  $('eEnd').style.display = t === 'Retirada' ? 'none' : 'block';
+  $('eUber').style.display = uf ? 'block' : 'none';
+  if (uf) $('eUber').innerHTML = '🛵 ' + esc(UBER.aviso || UBER_AVISO) + (UBER.aviso ? '<br><small style="color:var(--mut)">' + esc(UBER_AVISO) + '</small>' : '');
+  document.querySelectorAll('#fp div').forEach(d => d.style.display = (uf && d.dataset.f !== 'Pix') ? 'none' : '');   // Uber Flash: só Pix (o motoboy não leva maquininha)
+}
 function setEntrega(t) {
-  entrega = t;
-  $('eBtE').className = 'btn' + (t === 'Entrega' ? '' : ' o'); $('eBtR').className = 'btn' + (t === 'Retirada' ? '' : ' o');
-  $('eEnd').style.display = t === 'Entrega' ? 'block' : 'none';
-  renderCarrinho();
+  if (t === 'Uber Flash' && !UBER.ativo) t = 'Entrega';
+  const b = bairroSel(); entrega = t;   // leva o bairro já digitado para o outro modo
+  if (t === 'Uber Flash') { forma = 'Pix'; document.querySelectorAll('#fp div').forEach(x => x.classList.toggle('on', x.dataset.f === 'Pix')); }
+  setBairro(b); pintarEntrega(); renderCarrinho();
 }
 let cepT = null;
 function buscarCep() {
@@ -113,10 +127,10 @@ function preencherEnd() { if (!$('entBox') || endTocado || !perfil.end) return; 
 function limparEnd() { endTocado = false; if ($('entBox')) { CAMPOS_END.forEach(([i]) => $(i).value = ''); setBairro(''); } }
 // Bairro: com tabela de taxas no painel vira uma lista (com o valor de cada um); sem tabela, é um campo de texto
 let sigB = '';
-function mostrarBairro() { const lista = BAIRROS.length > 0; $('eBai').style.display = lista ? 'block' : 'none'; $('eBaiO').style.display = (!lista || $('eBai').value === '__outro') ? 'block' : 'none'; $('eBaiO').style.marginTop = lista ? '-4px' : '0'; }
+function mostrarBairro() { const lista = BAIRROS.length > 0 && entrega !== 'Uber Flash'; $('eBai').style.display = lista ? 'block' : 'none'; $('eBaiO').style.display = (!lista || $('eBai').value === '__outro') ? 'block' : 'none'; $('eBaiO').style.marginTop = lista ? '-4px' : '0'; }
 function setBairro(n) {
   if (!$('eBai')) return;
-  if (!BAIRROS.length) { $('eBaiO').value = n || ''; return mostrarBairro(); }
+  if (!BAIRROS.length || entrega === 'Uber Flash') { $('eBaiO').value = n || ''; return mostrarBairro(); }
   const m = acharBairro(n);
   if (m) { $('eBai').value = m.nome; $('eBaiO').value = ''; }
   else if (n && BAIRRO_OUTROS === 'padrao') { $('eBai').value = '__outro'; $('eBaiO').value = n; }
@@ -136,6 +150,7 @@ function lerEntrega() {
   const g = id => $(id).value.trim(), end = {};
   CAMPOS_END.forEach(([i, k]) => end[k] = g(i)); end.bairro = bairroSel();
   if (!end.rua || !end.numero || !end.bairro || !end.cidade) { aviso('Preencha rua, número, bairro e cidade'); return null; }
+  if (entrega === 'Uber Flash') return { tipo: 'Uber Flash', endereco: end };   // sem taxa por bairro: a corrida é combinada
   if (taxaEntrega() === null) { aviso('Não entregamos neste bairro. Escolha outro bairro ou retire na loja.'); return null; }
   return { tipo: 'Entrega', endereco: end };
 }
@@ -191,7 +206,8 @@ function renderResumo() {
   const lin = (a, b) => `<div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:4px"><span>${a}</span><span>${b}</span></div>`;
   const n = cart.reduce((a, c) => a + c.q, 0), sub = subtotal(), f = freteVal(), t = taxaEntrega(), b = bairroSel();
   let h = lin('Produtos (' + n + (n === 1 ? ' peça)' : ' peças)'), R$(sub)), obs = '';
-  if (entrega === 'Retirada') { h += lin('Retirada na loja', 'Sem custo'); if (RETIRADA.endereco) obs = 'Retire em: ' + esc(RETIRADA.endereco) + (RETIRADA.horario ? ' (' + esc(RETIRADA.horario) + ')' : '') + '.'; }
+  if (entrega === 'Uber Flash') { h += lin('Uber Flash', '<span style="color:var(--mut)">a combinar</span>'); obs = 'O valor da corrida depende da distância: a loja calcula e confirma pelo WhatsApp.'; }
+  else if (entrega === 'Retirada') { h += lin('Retirada na loja', 'Sem custo'); if (RETIRADA.endereco) obs = 'Retire em: ' + esc(RETIRADA.endereco) + (RETIRADA.horario ? ' (' + esc(RETIRADA.horario) + ')' : '') + '.'; }
   else if (BAIRROS.length && !b) h += lin('Entrega', '<span style="color:var(--mut)">escolha o bairro</span>');
   else if (t === null) { h += lin('Entrega', '<span style="color:#e5484d">indisponível</span>'); obs = '<span style="color:#e5484d">Não entregamos neste bairro. Escolha outro bairro ou retire na loja.</span>'; }
   else {
@@ -199,11 +215,11 @@ function renderResumo() {
     if (!f) obs = (FRETE_GRATIS > 0 && sub >= FRETE_GRATIS) ? 'Frete grátis: seu pedido passou de ' + R$(FRETE_GRATIS) + '.' : 'Entrega grátis para este bairro.';
     else if (FRETE_GRATIS > 0) obs = 'Faltam ' + R$(FRETE_GRATIS - sub) + ' em produtos para ganhar frete grátis.';
   }
-  const fim = 'Total = produtos' + (entrega === 'Entrega' ? ' + entrega' : '') + '.' + (forma === 'Pix' ? ' O código Pix abaixo já vem com este valor.' : '');
+  const fim = 'Total = produtos' + (entrega === 'Entrega' ? ' + entrega' : entrega === 'Uber Flash' ? ' (a corrida do Uber Flash é cobrada à parte)' : '') + '.' + (forma === 'Pix' ? ' O código Pix abaixo já vem com este valor.' : '');
   el.innerHTML = h + '<div style="color:var(--mut);font-size:12px;margin-top:6px">' + (obs ? obs + '<br>' : '') + fim + '</div>';
 }
 function renderCarrinho() {
-  montarEntrega(); renderCliente(); rotulosPagamento(); montarBairros(); preencherEnd();
+  montarEntrega(); pintarEntrega(); renderCliente(); rotulosPagamento(); montarBairros(); preencherEnd();
   $('itens').innerHTML = cart.map((c, i) => `<div class="li"><span>${esc(c.nome)} · ${esc(c.tam)}<br><span style="display:inline-flex;align-items:center;gap:12px;margin-top:6px"><a href="#" onclick="mudaQ(${i},-1);return false" style="font-size:18px;padding:0 6px" aria-label="Diminuir">−</a><b>${c.q}</b><a href="#" onclick="mudaQ(${i},1);return false" style="font-size:18px;padding:0 6px" aria-label="Aumentar">+</a></span></span><span>${R$(c.preco * c.q)} <a href="#" onclick="cart.splice(${i},1);renderCarrinho();$('qtd').textContent=cart.reduce((a,c)=>a+c.q,0);return false" style="color:var(--mut)">✕</a></span></div>`).join('') || '<p style="color:var(--mut)">Sacola vazia.</p>';
   renderRetirada(); renderResumo();
   $('tot').textContent = R$(total()); pixBox();
@@ -240,7 +256,7 @@ async function atualizarConta() {
   $('cNome').value = perfil.nome; $('cSob').value = perfil.sobrenome || ''; $('cTel').value = perfil.tel || '';
   offPed = db.collection('pedidos').where('uid', '==', user.uid).onSnapshot(s => {
     const docs = s.docs.map(d => d.data()).sort((a, b) => (b.criadoEm ? b.criadoEm.seconds : 9e9) - (a.criadoEm ? a.criadoEm.seconds : 9e9));
-    $('meus').innerHTML = docs.map(p => `<div class="li" style="display:block">${p.numero ? '<small style="color:var(--mut)">Pedido nº ' + fmtNum(p.numero) + '</small><br>' : ''}<b>${R$(p.total)}</b> · ${esc(pagTxt(p.pagamento, p.pagamentoQuando))} <span class="st s${STIDX[p.status] ?? 0}">${esc(p.status)}</span><br><small style="color:var(--mut)">${p.itens.map(i => esc(i.nome) + ' ' + esc(i.tam) + '×' + i.q).join(', ')}${p.entrega ? '<br>' + (p.entrega.tipo === 'Retirada' ? 'Retirada na loja' + (RETIRADA.endereco ? ' · ' + esc(RETIRADA.endereco) : '') : 'Entrega' + (p.frete ? ' · frete ' + R$(p.frete) : '')) : ''}</small></div>`).join('') || '<p style="color:var(--mut)">Você ainda não fez pedidos.</p>';
+    $('meus').innerHTML = docs.map(p => `<div class="li" style="display:block">${p.numero ? '<small style="color:var(--mut)">Pedido nº ' + fmtNum(p.numero) + '</small><br>' : ''}<b>${R$(p.total)}</b> · ${esc(pagTxt(p.pagamento, p.pagamentoQuando))} <span class="st s${STIDX[p.status] ?? 0}">${esc(p.status)}</span><br><small style="color:var(--mut)">${p.itens.map(i => esc(i.nome) + ' ' + esc(i.tam) + '×' + i.q).join(', ')}${p.entrega ? '<br>' + (p.entrega.tipo === 'Uber Flash' ? 'Uber Flash · frete a combinar' : p.entrega.tipo === 'Retirada' ? 'Retirada na loja' + (RETIRADA.endereco ? ' · ' + esc(RETIRADA.endereco) : '') : 'Entrega' + (p.frete ? ' · frete ' + R$(p.frete) : '')) : ''}</small></div>`).join('') || '<p style="color:var(--mut)">Você ainda não fez pedidos.</p>';
   });
 }
 // Todo visitante ganha uma identidade anônima e é registrado em "visitas" (aparece na aba Clientes do painel)
@@ -353,8 +369,8 @@ async function finalizar() {
     return aviso(e.code === 'permission-denied' ? 'Não foi possível registrar o pedido. Atualize a página e tente de novo.' : e.message.replace('Firebase: ', ''));
   }
   enviando = false;
-  if (ent.tipo === 'Entrega') { perfil.end = ent.endereco; db.collection('clientes').doc(user.uid).set({ end: ent.endereco }, { merge: true }).catch(() => {}); }   // guarda o endereço para a próxima compra
-  const entTxt = ent.tipo === 'Retirada' ? '*Retirada na loja*' + (RETIRADA.endereco ? '\n' + txtRetirada() : '') : '*Entrega*\n' + txtEnd(ent.endereco) + (ped.frete ? '\n*Frete:* ' + R$(ped.frete) : '');
+  if (ent.endereco) { perfil.end = ent.endereco; db.collection('clientes').doc(user.uid).set({ end: ent.endereco }, { merge: true }).catch(() => {}); }   // guarda o endereço para a próxima compra
+  const entTxt = ent.tipo === 'Uber Flash' ? '*Uber Flash*\n' + txtEnd(ent.endereco) + '\n*Frete:* a combinar (corrida do Uber Flash)' : ent.tipo === 'Retirada' ? '*Retirada na loja*' + (RETIRADA.endereco ? '\n' + txtRetirada() : '') : '*Entrega*\n' + txtEnd(ent.endereco) + (ped.frete ? '\n*Frete:* ' + R$(ped.frete) : '');
   const msg = `*NOVO PEDIDO · VSC Store*\nPedido nº ${fmtNum(ped.numero)}\n\n*Cliente*\n${ped.cliente.nome}\nWhatsApp: ${fmtTel(ped.cliente.tel)}\n\n*Itens*\n` + ped.itens.map(c => `${c.q}× ${c.nome} (${c.tam}) — ${R$(c.preco * c.q)}`).join('\n') + `\n\n${entTxt}\n\n*Pagamento:* ${pagTxt(forma, ped.pagamentoQuando)}\n*Total:* ${R$(ped.total)}`;
   const wa = `https://wa.me/${LOJA.whatsapp}?text=${encodeURIComponent(msg)}`; if (!window.open(wa, '_blank')) location.href = wa;
   cart = []; $('qtd').textContent = 0; fechar(); aviso('Pedido enviado! Acompanhe em Minha conta.');
