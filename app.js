@@ -62,7 +62,7 @@ function mudaQ(i, d) {
 const subtotal = () => cart.reduce((a, c) => a + c.preco * c.q, 0);
 const norm = x => String(x || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 const acharBairro = n => BAIRROS.find(b => norm(b.nome) === norm(n));
-const bairroSel = () => { if (!$('eBai')) return ''; if (!BAIRROS.length || entrega === 'Uber Flash') return $('eBaiO').value.trim(); const v = $('eBai').value; return v === '__outro' ? $('eBaiO').value.trim() : v; };
+const bairroSel = () => { if (!$('eBai')) return ''; if (!BAIRROS.length) return $('eBaiO').value.trim(); const v = $('eBai').value; return v === '__outro' ? $('eBaiO').value.trim() : v; };
 function taxaEntrega() {   // null = não entregamos nesse bairro
   if (!BAIRROS.length) return FRETE;   // sem tabela por bairro: taxa única
   const b = bairroSel(), m = acharBairro(b); if (m) return +m.taxa || 0;
@@ -90,23 +90,23 @@ function montarEntrega() {
   <div id="eRetBox" style="display:none;margin-bottom:12px"></div>`;
   const lab = fp.previousElementSibling; fp.parentNode.insertBefore(d, lab && lab.tagName === 'LABEL' ? lab : fp);
 }
-// Uber Flash: motoboy do Uber. O cliente informa o endereço e paga só os produtos por Pix; a corrida (que depende da distância) a loja confirma pelo WhatsApp.
-const UBER_AVISO = 'Entrega por motoboy do Uber Flash. O valor da corrida depende da distância: a loja calcula e confirma com você pelo WhatsApp. O Pix cobre só os produtos.';
+// Uber Flash: o CLIENTE chama o motoboy pelo app do Uber e ele retira o pedido na loja. Não pede endereço e não tem frete na loja.
+const UBER_AVISO = 'Você chama o Uber Flash pelo app e o motoboy retira o pedido na loja. A corrida é paga por você direto ao Uber. O Pix cobre só os produtos.';
 function pintarEntrega() {   // deixa a tela de acordo com a opção escolhida (Entrega, Uber Flash ou Retirada)
   if (!$('eBtE')) return;
   const t = entrega, uf = t === 'Uber Flash';
   $('eBtE').className = 'btn' + (t === 'Entrega' ? '' : ' o'); $('eBtR').className = 'btn' + (t === 'Retirada' ? '' : ' o'); $('eBtU').className = 'btn' + (uf ? '' : ' o');
   $('eBtU').style.display = UBER.ativo ? '' : 'none';
-  $('eEnd').style.display = t === 'Retirada' ? 'none' : 'block';
+  $('eEnd').style.display = t === 'Entrega' ? 'block' : 'none';   // endereço só para entrega da loja
   $('eUber').style.display = uf ? 'block' : 'none';
   if (uf) $('eUber').innerHTML = '🛵 ' + esc(UBER.aviso || UBER_AVISO) + (UBER.aviso ? '<br><small style="color:var(--mut)">' + esc(UBER_AVISO) + '</small>' : '');
   document.querySelectorAll('#fp div').forEach(d => d.style.display = (uf && d.dataset.f !== 'Pix') ? 'none' : '');   // Uber Flash: só Pix (o motoboy não leva maquininha)
 }
 function setEntrega(t) {
   if (t === 'Uber Flash' && !UBER.ativo) t = 'Entrega';
-  const b = bairroSel(); entrega = t;   // leva o bairro já digitado para o outro modo
+  entrega = t;
   if (t === 'Uber Flash') { forma = 'Pix'; document.querySelectorAll('#fp div').forEach(x => x.classList.toggle('on', x.dataset.f === 'Pix')); }
-  setBairro(b); pintarEntrega(); renderCarrinho();
+  pintarEntrega(); renderCarrinho();
 }
 let cepT = null;
 function buscarCep() {
@@ -127,10 +127,10 @@ function preencherEnd() { if (!$('entBox') || endTocado || !perfil.end) return; 
 function limparEnd() { endTocado = false; if ($('entBox')) { CAMPOS_END.forEach(([i]) => $(i).value = ''); setBairro(''); } }
 // Bairro: com tabela de taxas no painel vira uma lista (com o valor de cada um); sem tabela, é um campo de texto
 let sigB = '';
-function mostrarBairro() { const lista = BAIRROS.length > 0 && entrega !== 'Uber Flash'; $('eBai').style.display = lista ? 'block' : 'none'; $('eBaiO').style.display = (!lista || $('eBai').value === '__outro') ? 'block' : 'none'; $('eBaiO').style.marginTop = lista ? '-4px' : '0'; }
+function mostrarBairro() { const lista = BAIRROS.length > 0; $('eBai').style.display = lista ? 'block' : 'none'; $('eBaiO').style.display = (!lista || $('eBai').value === '__outro') ? 'block' : 'none'; $('eBaiO').style.marginTop = lista ? '-4px' : '0'; }
 function setBairro(n) {
   if (!$('eBai')) return;
-  if (!BAIRROS.length || entrega === 'Uber Flash') { $('eBaiO').value = n || ''; return mostrarBairro(); }
+  if (!BAIRROS.length) { $('eBaiO').value = n || ''; return mostrarBairro(); }
   const m = acharBairro(n);
   if (m) { $('eBai').value = m.nome; $('eBaiO').value = ''; }
   else if (n && BAIRRO_OUTROS === 'padrao') { $('eBai').value = '__outro'; $('eBaiO').value = n; }
@@ -146,11 +146,10 @@ function montarBairros() {
 }
 function trocarBairro() { mostrarBairro(); renderCarrinho(); }
 function lerEntrega() {
-  if (entrega === 'Retirada') return { tipo: 'Retirada' };
+  if (entrega === 'Retirada' || entrega === 'Uber Flash') return { tipo: entrega };   // sem endereço
   const g = id => $(id).value.trim(), end = {};
   CAMPOS_END.forEach(([i, k]) => end[k] = g(i)); end.bairro = bairroSel();
   if (!end.rua || !end.numero || !end.bairro || !end.cidade) { aviso('Preencha rua, número, bairro e cidade'); return null; }
-  if (entrega === 'Uber Flash') return { tipo: 'Uber Flash', endereco: end };   // sem taxa por bairro: a corrida é combinada
   if (taxaEntrega() === null) { aviso('Não entregamos neste bairro. Escolha outro bairro ou retire na loja.'); return null; }
   return { tipo: 'Entrega', endereco: end };
 }
@@ -160,9 +159,9 @@ const txtEnd = e => e.rua + ', ' + e.numero + (e.complemento ? ' (' + e.compleme
 const txtRetirada = () => (RETIRADA.endereco ? RETIRADA.endereco : '') + (RETIRADA.horario ? '\nHorário: ' + RETIRADA.horario : '');
 function renderRetirada() {
   const b = $('eRetBox'); if (!b) return;
-  b.style.display = entrega === 'Retirada' ? 'block' : 'none';
+  b.style.display = (entrega === 'Retirada' || entrega === 'Uber Flash') ? 'block' : 'none';
   b.innerHTML = RETIRADA.endereco
-    ? '<label>Local de retirada</label><div style="padding:10px 12px;border:1px solid var(--line)">📍 ' + esc(RETIRADA.endereco) + (RETIRADA.horario ? '<br><small style="color:var(--mut)">Horário: ' + esc(RETIRADA.horario) + '</small>' : '') + '</div>'
+    ? '<label>' + (entrega === 'Uber Flash' ? 'Endereço onde o motoboy retira' : 'Local de retirada') + '</label><div style="padding:10px 12px;border:1px solid var(--line)">📍 ' + esc(RETIRADA.endereco) + (RETIRADA.horario ? '<br><small style="color:var(--mut)">Horário: ' + esc(RETIRADA.horario) + '</small>' : '') + '</div>'
     : '<p style="color:var(--mut);font-size:13px">O local e o horário da retirada serão combinados pelo WhatsApp.</p>';
 }
 
@@ -206,7 +205,7 @@ function renderResumo() {
   const lin = (a, b) => `<div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:4px"><span>${a}</span><span>${b}</span></div>`;
   const n = cart.reduce((a, c) => a + c.q, 0), sub = subtotal(), f = freteVal(), t = taxaEntrega(), b = bairroSel();
   let h = lin('Produtos (' + n + (n === 1 ? ' peça)' : ' peças)'), R$(sub)), obs = '';
-  if (entrega === 'Uber Flash') { h += lin('Uber Flash', '<span style="color:var(--mut)">a combinar</span>'); obs = 'O valor da corrida depende da distância: a loja calcula e confirma pelo WhatsApp.'; }
+  if (entrega === 'Uber Flash') { h += lin('Uber Flash', '<span style="color:var(--mut)">sem frete na loja</span>'); obs = 'Você chama o Uber Flash e paga a corrida direto ao Uber.' + (RETIRADA.endereco ? ' Retirada em: ' + esc(RETIRADA.endereco) + (RETIRADA.horario ? ' (' + esc(RETIRADA.horario) + ')' : '') + '.' : ''); }
   else if (entrega === 'Retirada') { h += lin('Retirada na loja', 'Sem custo'); if (RETIRADA.endereco) obs = 'Retire em: ' + esc(RETIRADA.endereco) + (RETIRADA.horario ? ' (' + esc(RETIRADA.horario) + ')' : '') + '.'; }
   else if (BAIRROS.length && !b) h += lin('Entrega', '<span style="color:var(--mut)">escolha o bairro</span>');
   else if (t === null) { h += lin('Entrega', '<span style="color:#e5484d">indisponível</span>'); obs = '<span style="color:#e5484d">Não entregamos neste bairro. Escolha outro bairro ou retire na loja.</span>'; }
@@ -215,7 +214,7 @@ function renderResumo() {
     if (!f) obs = (FRETE_GRATIS > 0 && sub >= FRETE_GRATIS) ? 'Frete grátis: seu pedido passou de ' + R$(FRETE_GRATIS) + '.' : 'Entrega grátis para este bairro.';
     else if (FRETE_GRATIS > 0) obs = 'Faltam ' + R$(FRETE_GRATIS - sub) + ' em produtos para ganhar frete grátis.';
   }
-  const fim = 'Total = produtos' + (entrega === 'Entrega' ? ' + entrega' : entrega === 'Uber Flash' ? ' (a corrida do Uber Flash é cobrada à parte)' : '') + '.' + (forma === 'Pix' ? ' O código Pix abaixo já vem com este valor.' : '');
+  const fim = 'Total = produtos' + (entrega === 'Entrega' ? ' + entrega' : entrega === 'Uber Flash' ? ' (a corrida do Uber Flash você paga ao Uber)' : '') + '.' + (forma === 'Pix' ? ' O código Pix abaixo já vem com este valor.' : '');
   el.innerHTML = h + '<div style="color:var(--mut);font-size:12px;margin-top:6px">' + (obs ? obs + '<br>' : '') + fim + '</div>';
 }
 function renderCarrinho() {
@@ -256,7 +255,7 @@ async function atualizarConta() {
   $('cNome').value = perfil.nome; $('cSob').value = perfil.sobrenome || ''; $('cTel').value = perfil.tel || '';
   offPed = db.collection('pedidos').where('uid', '==', user.uid).onSnapshot(s => {
     const docs = s.docs.map(d => d.data()).sort((a, b) => (b.criadoEm ? b.criadoEm.seconds : 9e9) - (a.criadoEm ? a.criadoEm.seconds : 9e9));
-    $('meus').innerHTML = docs.map(p => `<div class="li" style="display:block">${p.numero ? '<small style="color:var(--mut)">Pedido nº ' + fmtNum(p.numero) + '</small><br>' : ''}<b>${R$(p.total)}</b> · ${esc(pagTxt(p.pagamento, p.pagamentoQuando))} <span class="st s${STIDX[p.status] ?? 0}">${esc(p.status)}</span><br><small style="color:var(--mut)">${p.itens.map(i => esc(i.nome) + ' ' + esc(i.tam) + '×' + i.q).join(', ')}${p.entrega ? '<br>' + (p.entrega.tipo === 'Uber Flash' ? 'Uber Flash · frete a combinar' : p.entrega.tipo === 'Retirada' ? 'Retirada na loja' + (RETIRADA.endereco ? ' · ' + esc(RETIRADA.endereco) : '') : 'Entrega' + (p.frete ? ' · frete ' + R$(p.frete) : '')) : ''}</small></div>`).join('') || '<p style="color:var(--mut)">Você ainda não fez pedidos.</p>';
+    $('meus').innerHTML = docs.map(p => `<div class="li" style="display:block">${p.numero ? '<small style="color:var(--mut)">Pedido nº ' + fmtNum(p.numero) + '</small><br>' : ''}<b>${R$(p.total)}</b> · ${esc(pagTxt(p.pagamento, p.pagamentoQuando))} <span class="st s${STIDX[p.status] ?? 0}">${esc(p.status)}</span><br><small style="color:var(--mut)">${p.itens.map(i => esc(i.nome) + ' ' + esc(i.tam) + '×' + i.q).join(', ')}${p.entrega ? '<br>' + (p.entrega.tipo === 'Uber Flash' ? 'Uber Flash · você chama o motoboy para retirar na loja' + (RETIRADA.endereco ? ' · ' + esc(RETIRADA.endereco) : '') : p.entrega.tipo === 'Retirada' ? 'Retirada na loja' + (RETIRADA.endereco ? ' · ' + esc(RETIRADA.endereco) : '') : 'Entrega' + (p.frete ? ' · frete ' + R$(p.frete) : '')) : ''}</small></div>`).join('') || '<p style="color:var(--mut)">Você ainda não fez pedidos.</p>';
   });
 }
 // Todo visitante ganha uma identidade anônima e é registrado em "visitas" (aparece na aba Clientes do painel)
@@ -369,8 +368,8 @@ async function finalizar() {
     return aviso(e.code === 'permission-denied' ? 'Não foi possível registrar o pedido. Atualize a página e tente de novo.' : e.message.replace('Firebase: ', ''));
   }
   enviando = false;
-  if (ent.endereco) { perfil.end = ent.endereco; db.collection('clientes').doc(user.uid).set({ end: ent.endereco }, { merge: true }).catch(() => {}); }   // guarda o endereço para a próxima compra
-  const entTxt = ent.tipo === 'Uber Flash' ? '*Uber Flash*\n' + txtEnd(ent.endereco) + '\n*Frete:* a combinar (corrida do Uber Flash)' : ent.tipo === 'Retirada' ? '*Retirada na loja*' + (RETIRADA.endereco ? '\n' + txtRetirada() : '') : '*Entrega*\n' + txtEnd(ent.endereco) + (ped.frete ? '\n*Frete:* ' + R$(ped.frete) : '');
+  if (ent.tipo === 'Entrega') { perfil.end = ent.endereco; db.collection('clientes').doc(user.uid).set({ end: ent.endereco }, { merge: true }).catch(() => {}); }   // guarda o endereço para a próxima compra
+  const entTxt = ent.tipo === 'Uber Flash' ? '*Uber Flash* (o cliente chama o motoboy para retirar na loja)' + (RETIRADA.endereco ? '\n' + txtRetirada() : '') : ent.tipo === 'Retirada' ? '*Retirada na loja*' + (RETIRADA.endereco ? '\n' + txtRetirada() : '') : '*Entrega*\n' + txtEnd(ent.endereco) + (ped.frete ? '\n*Frete:* ' + R$(ped.frete) : '');
   const msg = `*NOVO PEDIDO · VSC Store*\nPedido nº ${fmtNum(ped.numero)}\n\n*Cliente*\n${ped.cliente.nome}\nWhatsApp: ${fmtTel(ped.cliente.tel)}\n\n*Itens*\n` + ped.itens.map(c => `${c.q}× ${c.nome} (${c.tam}) — ${R$(c.preco * c.q)}`).join('\n') + `\n\n${entTxt}\n\n*Pagamento:* ${pagTxt(forma, ped.pagamentoQuando)}\n*Total:* ${R$(ped.total)}`;
   const wa = `https://wa.me/${LOJA.whatsapp}?text=${encodeURIComponent(msg)}`; if (!window.open(wa, '_blank')) location.href = wa;
   cart = []; $('qtd').textContent = 0; fechar(); aviso('Pedido enviado! Acompanhe em Minha conta.');
