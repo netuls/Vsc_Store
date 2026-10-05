@@ -7,7 +7,10 @@ service cloud.firestore {
     // Vitrine: todos leem, só o admin altera
     match /produtos/{id} { allow read: if true; allow write: if admin(); }
 
-    // Ajustes da loja (Pix, frete, bairros, retirada, mensagens...)
+    // Galeria de fotos do carrossel: todos leem, só o admin altera
+    match /galeria/{id} { allow read: if true; allow write: if admin(); }
+
+    // Ajustes da loja (Pix, frete, bairros, retirada, mensagens, título da galeria...)
     match /config/loja { allow read: if true; allow write: if admin(); }
     // Contador do número do pedido: o cliente atualiza ao finalizar a compra
     match /config/contador {
