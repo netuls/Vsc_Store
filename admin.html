@@ -9,6 +9,7 @@
 <div id="app" style="display:none">
 <div class="tabs"><button class="on" id="tbP" onclick="aba('P')">Painel</button><button id="tbR" onclick="aba('R')">Relatórios</button><button id="tbC" onclick="aba('C')">Clientes</button></div>
 <div id="tP">
+<div class="sec" style="padding-bottom:0"><div id="alertaEstoque"></div></div>
 <div class="sec"><h2 class="pt">PEDIDOS</h2><div style="overflow:auto"><table class="tb"><thead><tr><th>Cliente</th><th>WhatsApp</th><th>Itens</th><th>Data</th><th>Pagamento</th><th>Valor</th><th>Status</th><th>Ações</th></tr></thead><tbody id="peds"></tbody></table></div></div>
 <div class="sec"><h2 class="pt">AJUSTES DA LOJA</h2>
 <label>WhatsApp que recebe os pedidos (DDD + número)</label><input id="aw" type="tel" inputmode="tel" placeholder="85999998888">
@@ -55,7 +56,7 @@
 <label>Nome</label><input id="epN"><label>Preço</label><input id="epP" type="number" step="0.01" inputmode="decimal">
 <label>Preço promocional (deixe vazio se não estiver em promoção)</label><input id="epPm" type="number" step="0.01" inputmode="decimal"><label>Categoria</label><input id="epC">
 <button class="btn" style="width:100%;margin-bottom:8px" onclick="salvarProd()">Salvar</button><button class="btn o" style="width:100%" onclick="fecharProd()">Cancelar</button></div></div>
-<div class="toast" id="toast"></div><script src="config.js"></script><script src="pix.js"></script><script src="admin.js"></script>
+<div class="toast" id="toast"></div><script src="config.js"></script><script src="pix.js"></script><script src="admin.js?v=20261005a"></script>
 <script>
 async function reiniciarContagem() {
   if (!confirm('Reiniciar a contagem? O próximo pedido será o nº 01.')) return;
